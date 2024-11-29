@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Chat Room</title>
+        <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    </head>
+    <body>
+        <div class="content">
+            <div class="room-info">
+                <h2>Whiteboard Application</h2>
+                <div class="dropdown" id="members-dropdown">
+                    <button class="dropbtn" onclick="toggleDropdown()">
+                        Members (<span id="member-count">0</span>) ↓
+                    </button>
+                    <div class="dropdown-content" id="members-list">
+                        {% for member in members %}
+                        <div class="member-item">
+                            <span style="color: {{ rooms[DEFAULT_ROOM]['member_colors'][member] }}">
+                                {{ member }}{% if member == session.get('name') %} (Me){% endif %}
+                            </span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+
+            <div class="message-box">
+                <div class="messages" id="messages">
+                    {% for msg in messages %}
+                    <div class="text {% if msg.type == 'system' %}system-message{% endif %}">
+                        <span class="timestamp">[{{ msg.timestamp if msg.timestamp else "00:00:00" }}]</span>
+                        <span><strong style="color: {{ msg.color if msg.color else '#000000' }}">{{ msg.name }}</strong>: {{ msg.message }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+                <div class="inputs">
+                    <input type="text" rows="3" placeholder="Message" name="message" id="message"/>
+                    <button type="button" name="send" id="send-btn" onclick="sendMessage()">
+                        Send
+                    </button>
+                </div>
+            </div>
+
+            <div class="canvas-container">
+                <canvas id="drawingCanvas" style="touch-action: none;"></canvas>
+                <div class="canvas-controls">
+                    <button type="button" id="clearBtn" onclick="clearCanvas()">Clear Canvas</button>
+                </div>
+            </div>
+
+            <div class="leave-room">
+                <button type="button" id="leave-btn" onclick="leaveRoom()">
+                    Leave Room
+                </button>
+            </div>
+        </div>
+
+        <script type="text/javascript">
+            var socket = io();
+
+            const messages = document.getElementById('messages');
+            const messageInput = document.getElementById('message');
+            const membersList = document.getElementById('members-list');
+            const memberCount = document.getElementById('member-count');
+
+            // Update members list function
+            const updateMembers = (members, colors) => {
+                memberCount.textContent = members.length;
+                membersList.innerHTML = members
+                    .map(member => `
+                        <div class="member-item">
+                            <span style="color: ${colors[member]}">
+                                ${member}${member === '{{ session.get('name') }}' ? ' (Me)' : ''}
+                            </span>
+                        </div>
+                    `)
+                    .join('');
+            };
+
+            // Toggle dropdown
+            const toggleDropdown = () => {
+                membersList.classList.toggle('show');
+            };
+
+            // Close dropdown when clicking outside
+            window.onclick = (event) => {
+                if (!event.target.matches('.dropbtn')) {
+                    const dropdowns = document.getElementsByClassName('dropdown-content');
+                    for (let dropdown of dropdowns) {
+                        if (dropdown.classList.contains('show')) {
+                            dropdown.classList.remove('show');
+                        }
+                    }
+                }
+            };
+
+            // Listen for member updates from server
+            socket.on('update_members', (data) => {
+                updateMembers(data.members, data.colors);
+            });
+
+            // Create and append a new message to the messages div
+            const createMessage = (name, msg, timestamp, color, type) => {
+                const content = `
+                    <div class="text ${type === 'system' ? 'system-message' : ''}">
+                        <span class="timestamp">[${timestamp}]</span>
+                        <span><strong style="color: ${color}">${name}</strong>: ${msg}</span>
+                    </div>
+                `;
+                messages.innerHTML += content;
+                messages.scrollTop = messages.scrollHeight;
+            };
+
+            // Listen for messages from the server
+            socket.on('message', (data) => {
+                createMessage(data.name, data.message, data.timestamp, data.color, data.type);
+            });
+
+            // Send message function
+            const sendMessage = () => {
+                if (messageInput.value.trim() === "") return;
+                socket.emit('message', { data: messageInput.value });
+                messageInput.value = "";
+            };
+
+            // Handle Enter key press
+            messageInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    sendMessage();
+                }
+            });
+
+            // Leave room function
+            const leaveRoom = () => {
+                window.location.href = "/";
+            };
+
+            // Canvas setup
+            const canvas = document.getElementById('drawingCanvas');
+            const ctx = canvas.getContext('2d');
+            let isDrawing = false;
+            let lastX = 0;
+            let lastY = 0;
+
+            // Set canvas size
+            function resizeCanvas() {
+                const rect = canvas.parentElement.getBoundingClientRect();
+                canvas.width = rect.width;
+                canvas.height = 400;
+                // Redraw existing drawings after resize
+                if (window.savedDrawings) {
+                    window.savedDrawings.forEach(drawLine);
+                }
+            }
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+
+            // Drawing functions
+            function startDrawing(e) {
+                isDrawing = true;
+                [lastX, lastY] = [e.offsetX, e.offsetY];
+            }
+
+            function draw(e) {
+                if (!isDrawing) return;
+                
+                const drawData = {
+                    x0: lastX,
+                    y0: lastY,
+                    x1: e.offsetX,
+                    y1: e.offsetY,
+                    color: 'black'
+                };
+
+                drawLine(drawData);
+                socket.emit('draw', drawData);
+
+                [lastX, lastY] = [e.offsetX, e.offsetY];
+            }
+
+            function drawLine(data) {
+                ctx.beginPath();
+                ctx.moveTo(data.x0, data.y0);
+                ctx.lineTo(data.x1, data.y1);
+                ctx.strokeStyle = data.color;
+                ctx.lineWidth = 2;
+                ctx.lineCap = 'round';
+                ctx.stroke();
+            }
+
+            function stopDrawing() {
+                isDrawing = false;
+            }
+
+            // Canvas event listeners
+            canvas.addEventListener('mousedown', startDrawing);
+            canvas.addEventListener('mousemove', draw);
+            canvas.addEventListener('mouseup', stopDrawing);
+            canvas.addEventListener('mouseout', stopDrawing);
+
+            // Socket listeners for drawing
+            socket.on('draw', drawLine);
+            
+            socket.on('load_drawings', (drawings) => {
+                window.savedDrawings = drawings; // Save drawings for resize
+                drawings.forEach(drawLine);
+            });
+
+            socket.on('clear_canvas', () => {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            });
+
+            // Clear canvas function
+            function clearCanvas() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                socket.emit('clear_canvas');
+            }
+
+            // Add touch support
+            canvas.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                const touch = e.touches[0];
+                const rect = canvas.getBoundingClientRect();
+                const x = touch.clientX - rect.left;
+                const y = touch.clientY - rect.top;
+                isDrawing = true;
+                [lastX, lastY] = [x, y];
+            });
+
+            canvas.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                if (!isDrawing) return;
+                const touch = e.touches[0];
+                const rect = canvas.getBoundingClientRect();
+                const x = touch.clientX - rect.left;
+                const y = touch.clientY - rect.top;
+                
+                const drawData = {
+                    x0: lastX,
+                    y0: lastY,
+                    x1: x,
+                    y1: y,
+                    color: black
+                };
+
+                drawLine(drawData);
+                socket.emit('draw', drawData);
+
+                [lastX, lastY] = [x, y];
+            });
+
+            canvas.addEventListener('touchend', stopDrawing);
+            canvas.addEventListener('touchcancel', stopDrawing);
+        </script>
+    </body>
+</html>
