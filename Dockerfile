@@ -5,13 +5,16 @@ FROM python:3.9-slim
 WORKDIR /app
 
 # Step 3: Copy the application source code into the container
-COPY . .
+COPY . /app
 
 # Step 4: Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Step 5: Expose the port used by the Flask application
-EXPOSE 5000
+EXPOSE 80
+
+# Define environment variable
+ENV NAME World
 
 # Step 6: Set the command to run the application
-CMD ["python", "main.py"]
+CMD ["python", "app.py"]
