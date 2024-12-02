@@ -153,4 +153,4 @@ def handle_clear():
     emit('clear_canvas', room=DEFAULT_ROOM)
 
 if __name__ == '__main__':
-    socketio.run(app, debug=True)
+    socketio.run(app, debug=True, host='0.0.0.0')
